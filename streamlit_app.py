@@ -67,9 +67,8 @@ margin-bottom:15px;
 ">
 
 <b>What this app does:</b><br>
-Uses 1-minute intraday stock data, converts it into images, and predicts next-day volatility with a CNN.
-
-<br><br>
+Forecasts next-day stock volatility using high-frequency intraday data transformed into images and processed by a convolutional neural network (CNN). 
+Grad-CAM provides model interpretability by highlighting the most influential regions of the input image.
 
 <b>How to interpret results:</b><br>
 • Values are next day’s <b>annualized volatility (%)</b><br>
