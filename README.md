@@ -61,19 +61,31 @@ streamlit run streamlit_app.py
 
 ## Run with Docker
 
-Build the Docker image:
+```markdown
+Make sure Docker is installed and running on your system.
 
+### 1. Build the image
+
+```bash
 docker build -t volatility-streamlit .
+```
 
-Run the container:
+### 2. Run the container
 
-docker run -p 8501:8501 volatility-streamlit
+```bash
+docker run -d --rm -p 8501:8501 --name volatility-app volatility-streamlit
+```
 
-Open in browser:
+### 3. Open in browser
 
 http://localhost:8501
 
-Make sure Docker Desktop is running before executing the commands.
+### 4. Stop the app
+
+```bash
+docker stop volatility-app
+```
+
 
 ---
 
