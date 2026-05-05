@@ -8,25 +8,34 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 
+MARKET_TZ = "America/New_York"
+
+
 def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
     df = yf.download(
         ticker,
         interval="1m",
         period=f"{num_days}d",
         progress=False,
-        auto_adjust=False
+        auto_adjust=False,
+        threads=False
     )
 
     if df.empty:
-        raise ValueError(f"No data returned for {ticker}")
+        raise ValueError(
+            f"No data returned for {ticker}. Yahoo Finance may be rate-limiting requests."
+        )
 
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
     df.index = pd.to_datetime(df.index)
 
+    # Robust timezone handling for Streamlit Cloud
     if df.index.tz is not None:
-        df = df.tz_convert("US/Eastern")
+        df = df.tz_convert(MARKET_TZ)
+    else:
+        df = df.tz_localize("UTC").tz_convert(MARKET_TZ)
 
     full_days = {}
 
@@ -37,21 +46,36 @@ def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
         if not day.empty and day.index.max().time() >= time(15, 59):
             full_days[d] = day
 
+    if not full_days:
+        raise ValueError(f"No complete intraday trading days found for {ticker}")
+
     return full_days
 
 
 def preprocess_yahoo_1min_for_cnn(day, ticker):
     df = day.copy()
+
+    if df.index.tz is None:
+        df.index = df.index.tz_localize(MARKET_TZ)
+    else:
+        df = df.tz_convert(MARKET_TZ)
+
     df = df.between_time("09:30", "16:00")
 
+    if df.empty:
+        raise ValueError(f"No trading-hour data available for {ticker}")
+
     full_index = pd.date_range(
-        start=df.index.min().replace(second=0),
-        end=df.index.max().replace(second=0),
+        start=df.index.min().replace(second=0, microsecond=0),
+        end=df.index.max().replace(second=0, microsecond=0),
         freq="1min",
-        tz=df.index.tz
+        tz=MARKET_TZ
     )
 
     df = df.reindex(full_index)
+
+    if "Close" not in df.columns:
+        raise ValueError(f"Close column missing for {ticker}")
 
     df["Close"] = df["Close"].ffill()
 
@@ -170,9 +194,11 @@ def run_volatility_pipeline(ticker, num_days, model):
     )
 
     results_df["error_raw"] = results_df["prediction"] - results_df["actual_RV"]
+
     results_df["error_daily_pct"] = (
         results_df["prediction_daily_pct"] - results_df["actual_RV_daily_pct"]
     )
+
     results_df["error_annualized"] = (
         results_df["prediction_annualized"] - results_df["actual_RV_annualized"]
     )
