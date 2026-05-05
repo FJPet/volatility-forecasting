@@ -1,3 +1,8 @@
+## Live Demo
+ https://your-app-name.streamlit.app
+This app forecasts next-day volatility using a CNN trained on intraday data and provides explainability via Grad-CAM.
+
+
 # Explainable CNN Volatility Forecasting
 
 This project implements a deep learning approach to forecasting next-day realized volatility using intraday stock data.
@@ -7,7 +12,6 @@ The model transforms intraday returns into image representations and applies a C
 ---
 
 ## Features
-
 - Next-day volatility forecasting  
 - CNN-based deep learning model  
 - Image representation of intraday returns  
