@@ -1,0 +1,10 @@
+streamlit
+tensorflow
+yfinance
+pandas
+numpy
+matplotlib
+opencv-python-headless
+fastapi
+uvicorn
+pydantic
