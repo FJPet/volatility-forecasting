@@ -51,16 +51,33 @@ st.markdown(
 )
 
 
-st.markdown(
-    """
-    <div class="main-title">Explainable CNN Volatility Forecasting</div>
-    <div class="subtitle">
-    Next-day realized volatility forecasts from intraday return images with Grad-CAM explainability.
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown("""
+<div class="main-title">Explainable CNN Volatility Forecasting</div>
 
+<div class="subtitle">
+Forecast next-day stock volatility using intraday data and deep learning.
+</div>
+
+<div style="
+padding:12px;
+border-radius:10px;
+background-color:#f8f9fb;
+border:1px solid #e6e8eb;
+margin-bottom:15px;
+">
+
+<b>What this app does:</b><br>
+Uses 1-minute intraday stock data, converts it into images, and predicts next-day volatility with a CNN.
+
+<br><br>
+
+<b>How to interpret results:</b><br>
+• Values are next day’s <b>annualized volatility (%)</b><br>
+• Higher values = higher market uncertainty<br>
+• “Change” compares prediction to the previous day’s realized volatility
+
+</div>
+""", unsafe_allow_html=True)
 
 # ==================================================
 # Grad-CAM helper functions
