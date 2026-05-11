@@ -1,5 +1,5 @@
 ## Live Demo
- https://your-app-name.streamlit.app
+https://volatility-forecasting.streamlit.app
 This app forecasts next-day volatility using a CNN trained on intraday data and provides explainability via Grad-CAM.
 
 
