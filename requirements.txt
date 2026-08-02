@@ -1,7 +1,6 @@
 streamlit
 tensorflow
-yfinance==0.2.65
-curl_cffi==0.12.0
+yfinance==1.4.0
 pandas
 numpy
 matplotlib
