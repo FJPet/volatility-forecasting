@@ -9,3 +9,4 @@ fastapi
 uvicorn
 pydantic
 tzdata
+cachetools
