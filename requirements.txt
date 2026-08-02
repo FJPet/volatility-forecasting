@@ -1,6 +1,6 @@
 streamlit
 tensorflow
-yfinance
+yfinance==1.5.1
 pandas
 numpy
 matplotlib
