@@ -18,7 +18,6 @@ MARKET_TZ = "America/New_York"
 SAMPLE_DATA_DIR = Path(__file__).resolve().parent / "sample_data"
 
 
-# Successful downloads or fallback files are reused for 30 minutes.
 market_data_cache = TTLCache(
     maxsize=32,
     ttl=1800
@@ -26,14 +25,6 @@ market_data_cache = TTLCache(
 
 
 def load_sample_intraday_data(ticker: str) -> pd.DataFrame:
-    """
-    Load stored 1-minute demonstration data.
-
-    Expected files:
-        sample_data/AAPL_1min.csv
-        sample_data/MSFT_1min.csv
-        sample_data/KO_1min.csv
-    """
     ticker = ticker.strip().upper()
     sample_path = SAMPLE_DATA_DIR / f"{ticker}_1min.csv"
 
@@ -51,6 +42,7 @@ def load_sample_intraday_data(ticker: str) -> pd.DataFrame:
     df.index = pd.to_datetime(df.index)
 
     return df
+
 
 @cached(market_data_cache)
 def download_intraday_data(
@@ -95,6 +87,50 @@ def download_intraday_data(
             f"No live or stored data is available for {ticker}: "
             f"{fallback_error}"
         ) from fallback_error
+
+
+def get_recent_full_intraday_days(
+    ticker: str = "AAPL",
+    num_days: int = 7
+) -> tuple[dict, str]:
+    ticker = ticker.strip().upper()
+
+    df, data_source = download_intraday_data(ticker)
+    df = df.copy()
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df.index = pd.to_datetime(df.index)
+
+    if df.index.tz is not None:
+        df = df.tz_convert(MARKET_TZ)
+    else:
+        df = df.tz_localize("UTC").tz_convert(MARKET_TZ)
+
+    full_days = {}
+
+    for day_date in sorted(pd.Series(df.index.date).unique()):
+        day = df[df.index.date == day_date].copy()
+        day = day.between_time("09:30", "16:00")
+
+        if (
+            not day.empty
+            and day.index.max().time() >= market_time(15, 59)
+        ):
+            full_days[day_date] = day
+
+    if not full_days:
+        raise ValueError(
+            f"No complete intraday trading days found for {ticker}"
+        )
+
+    full_days = dict(
+        list(sorted(full_days.items()))[-num_days:]
+    )
+
+    return full_days, data_source
+
 
 def preprocess_yahoo_1min_for_cnn(
     day: pd.DataFrame,
@@ -324,7 +360,6 @@ def run_volatility_pipeline(
         results
     )
 
-    # Store whether the pipeline used live or demo data.
     results_df.attrs["data_source"] = data_source
 
     annualization_factor = np.sqrt(252)
