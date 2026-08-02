@@ -67,13 +67,23 @@ margin-bottom:15px;
 ">
 
 <b>What this app does:</b><br>
-Forecasts next-day stock volatility using high-frequency intraday data transformed into images and processed by a convolutional neural network (CNN). 
-Grad-CAM provides model interpretability by highlighting the most influential regions of the input image.
+Forecasts next-day stock volatility from recent 1-minute intraday prices.
 
+<br><br>
+<b>Processing pipeline:</b><br>
+1. The app first tries to download recent 1-minute market data from Yahoo Finance.<br>
+2. If live data is unavailable, it automatically uses a stored demonstration snapshot for AAPL, MSFT or KO.<br>
+3. Prices are restricted to regular US trading hours and converted into 1-minute log returns.<br>
+4. Each trading day is transformed into a 380×380 waterfall image that preserves the timing, sign and magnitude of intraday returns.<br>
+5. The pretrained convolutional neural network (CNN) processes the image and predicts next-day realized volatility.<br>
+6. Grad-CAM highlights the image regions that had the strongest influence on the forecast.
+
+<br><br>
 <b>How to interpret results:</b><br>
 • Values are next day’s <b>annualized volatility (%)</b><br>
-• Higher values = higher market uncertainty<br>
-• “Change” compares prediction to the previous day’s realized volatility
+• Higher values indicate greater expected market uncertainty<br>
+• “Change” compares the prediction with the previous day’s realized volatility<br>
+• A yellow data notice means the app is using a stored demonstration snapshot rather than live data
 
 </div>
 """, unsafe_allow_html=True)
@@ -197,7 +207,7 @@ num_days = st.sidebar.slider(
 run_button = st.sidebar.button(
     "Run forecast",
     type="primary",
-    use_container_width=True
+    width="stretch"
 )
 
 st.sidebar.markdown("---")
@@ -329,6 +339,35 @@ with tab_forecast:
                         model=model
                     )
 
+                data_source = results_df.attrs.get("data_source", "unknown")
+
+                if data_source == "live":
+                    st.success(
+                        "Data source: Live Yahoo Finance 1-minute data."
+                    )
+                elif data_source == "demo":
+                    demo_dates = pd.to_datetime(
+                        results_df["input_day"],
+                        errors="coerce"
+                    ).dropna()
+
+                    if not demo_dates.empty:
+                        demo_start = demo_dates.min().strftime("%Y-%m-%d")
+                        demo_end = demo_dates.max().strftime("%Y-%m-%d")
+                        date_text = f" Snapshot period: {demo_start} to {demo_end}."
+                    else:
+                        date_text = ""
+
+                    st.warning(
+                        "Live Yahoo Finance data is currently unavailable. "
+                        "The forecast is being generated from a stored "
+                        f"demonstration dataset.{date_text}"
+                    )
+                else:
+                    st.info(
+                        "The app could not identify whether live or stored data was used."
+                    )
+
                 last_row = results_df.iloc[-1]
                 previous_vol, diff, direction = compute_direction(last_row, results_df)
 
@@ -361,14 +400,14 @@ with tab_forecast:
                 })
 
                 with st.expander("Show detailed forecast table"):
-                    st.dataframe(results_df, use_container_width=True)
+                    st.dataframe(results_df, width="stretch")
 
                 st.markdown("#### Forecast performance")
 
                 fig = make_forecast_plot(results_df, ticker)
 
                 if fig is not None:
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig, width="stretch")
                 else:
                     st.warning("Not enough actual values to create forecast plot.")
 
@@ -383,7 +422,7 @@ with tab_forecast:
                     st.image(
                         latest_img,
                         caption=f"{ticker}_{latest_day} | CNN input waterfall image",
-                        use_container_width=True
+                        width="stretch"
                     )
 
                 with img_col2:
@@ -399,7 +438,7 @@ with tab_forecast:
                                 f"{ticker}_{latest_day} | Grad-CAM overlay | "
                                 f"Forecast: {gradcam_pred:.2f}%"
                             ),
-                            use_container_width=True
+                            width="stretch"
                         )
                     except Exception as gradcam_error:
                         st.warning(
@@ -431,7 +470,7 @@ with tab_forecast:
                 na_position="last"
             )
 
-        st.dataframe(summary_df, use_container_width=True)
+        st.dataframe(summary_df, width="stretch")
 
 
 # ==================================================
@@ -451,15 +490,40 @@ with tab_model:
     )
 
     st.markdown("""
-    ### Pipeline
+    ### End-to-end pipeline
 
-    1. Download recent 1-minute intraday prices  
-    2. Restrict data to regular trading hours  
-    3. Forward-fill missing minutes  
-    4. Compute 1-minute log returns  
-    5. Transform returns into a 380×380 RGB waterfall image  
-    6. Feed the image into the CNN  
-    7. Return an annualized next-day volatility forecast  
+    **1. Obtain intraday market data**  
+    The app requests recent 1-minute prices from Yahoo Finance. If the live
+    request fails, a stored snapshot is used so the public demonstration
+    remains functional.
+
+    **2. Standardize the trading day**  
+    Observations are converted to New York time, restricted to regular market
+    hours and reindexed to a complete 1-minute grid. Missing prices are
+    forward-filled.
+
+    **3. Calculate intraday returns**  
+    The app computes 1-minute logarithmic returns between 09:35 and 15:55,
+    resulting in 380 return observations for a complete trading day.
+
+    **4. Transform the time series into an image**  
+    Consecutive returns are connected as vertical bars. Positive movements are
+    shown in green and negative movements in red. The resulting 380×380 RGB
+    waterfall image preserves the sequence and local structure of intraday
+    movements.
+
+    **5. Run the pretrained CNN**  
+    The image is passed to a convolutional neural network trained to predict
+    the following trading day’s realized volatility.
+
+    **6. Annualize and evaluate the forecast**  
+    Predictions and realized volatility are reported on an annualized scale.
+    Where actual values are available, the dashboard also reports forecast
+    errors and RMSE.
+
+    **7. Explain the prediction with Grad-CAM**  
+    Grad-CAM produces a heatmap showing which regions of the input image had
+    the strongest influence on the CNN forecast.
     """)
 
     st.markdown("""
