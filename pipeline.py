@@ -1,7 +1,9 @@
 import time as time_module
 from datetime import time as market_time
+from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -13,17 +15,47 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 
 MARKET_TZ = "America/New_York"
+SAMPLE_DATA_DIR = Path(__file__).resolve().parent / "sample_data"
 
-# Reuse successful Yahoo downloads for 30 minutes.
+
+# Successful downloads or fallback files are reused for 30 minutes.
 market_data_cache = TTLCache(
     maxsize=32,
     ttl=1800
 )
 
 
+def load_sample_intraday_data(ticker: str) -> pd.DataFrame:
+    """
+    Load stored 1-minute demonstration data.
+
+    Expected files:
+        sample_data/AAPL_1min.csv
+        sample_data/MSFT_1min.csv
+        sample_data/KO_1min.csv
+    """
+    ticker = ticker.strip().upper()
+    sample_path = SAMPLE_DATA_DIR / f"{ticker}_1min.csv"
+
+    if not sample_path.exists():
+        raise ValueError(
+            f"No stored demonstration data is available for {ticker}."
+        )
+
+    df = pd.read_csv(
+        sample_path,
+        index_col="Datetime",
+        parse_dates=["Datetime"]
+    )
+
+    df.index = pd.to_datetime(df.index)
+
+    return df
+
 @cached(market_data_cache)
-def download_intraday_data(ticker: str) -> pd.DataFrame:
-    """Download recent 1-minute data with retry logic and in-memory caching."""
+def download_intraday_data(
+    ticker: str
+) -> tuple[pd.DataFrame, str]:
     ticker = ticker.strip().upper()
     last_error = None
 
@@ -40,67 +72,34 @@ def download_intraday_data(ticker: str) -> pd.DataFrame:
             )
 
             if df is not None and not df.empty:
-                return df
+                return df, "live"
 
         except Exception as error:
             last_error = error
 
-        # Wait 1 second, then 2 seconds, then 4 seconds.
         time_module.sleep(2 ** attempt)
 
-    if last_error is not None:
+    try:
+        fallback_df = load_sample_intraday_data(ticker)
+        return fallback_df, "demo"
+
+    except Exception as fallback_error:
+        if last_error is not None:
+            raise ValueError(
+                f"Live Yahoo Finance request failed for {ticker}: "
+                f"{last_error}. Stored demonstration data also failed: "
+                f"{fallback_error}"
+            ) from fallback_error
+
         raise ValueError(
-            f"Yahoo Finance request failed for {ticker}: {last_error}"
-        )
+            f"No live or stored data is available for {ticker}: "
+            f"{fallback_error}"
+        ) from fallback_error
 
-    raise ValueError(
-        f"No data returned for {ticker}. "
-        "Yahoo Finance may be rate-limiting Streamlit Cloud."
-    )
-
-
-def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
-    ticker = ticker.strip().upper()
-    df = download_intraday_data(ticker).copy()
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    df.index = pd.to_datetime(df.index)
-
-    # Robust timezone handling for Streamlit Cloud.
-    if df.index.tz is not None:
-        df = df.tz_convert(MARKET_TZ)
-    else:
-        df = df.tz_localize("UTC").tz_convert(MARKET_TZ)
-
-    full_days = {}
-
-    for day_date in sorted(pd.Series(df.index.date).unique()):
-        day = df[df.index.date == day_date].copy()
-        day = day.between_time("09:30", "16:00")
-
-        if (
-            not day.empty
-            and day.index.max().time() >= market_time(15, 59)
-        ):
-            full_days[day_date] = day
-
-    if not full_days:
-        raise ValueError(
-            f"No complete intraday trading days found for {ticker}"
-        )
-
-    # Yahoo's 1-minute endpoint typically returns up to about seven
-    # calendar days, so fewer than num_days trading days may be available.
-    full_days = dict(
-        list(sorted(full_days.items()))[-num_days:]
-    )
-
-    return full_days
-
-
-def preprocess_yahoo_1min_for_cnn(day, ticker):
+def preprocess_yahoo_1min_for_cnn(
+    day: pd.DataFrame,
+    ticker: str
+) -> pd.DataFrame:
     df = day.copy()
 
     if df.index.tz is None:
@@ -116,8 +115,14 @@ def preprocess_yahoo_1min_for_cnn(day, ticker):
         )
 
     full_index = pd.date_range(
-        start=df.index.min().replace(second=0, microsecond=0),
-        end=df.index.max().replace(second=0, microsecond=0),
+        start=df.index.min().replace(
+            second=0,
+            microsecond=0
+        ),
+        end=df.index.max().replace(
+            second=0,
+            microsecond=0
+        ),
         freq="1min",
         tz=MARKET_TZ
     )
@@ -131,9 +136,9 @@ def preprocess_yahoo_1min_for_cnn(day, ticker):
 
     df["Close"] = df["Close"].ffill()
 
-    for col in ["Open", "High", "Low"]:
-        if col in df.columns:
-            df[col] = df[col].ffill()
+    for column in ["Open", "High", "Low"]:
+        if column in df.columns:
+            df[column] = df[column].ffill()
 
     df = df[
         (df.index.time >= market_time(9, 35))
@@ -141,27 +146,42 @@ def preprocess_yahoo_1min_for_cnn(day, ticker):
     ]
 
     df["Log_Returns"] = (
-        np.log(df["Close"] / df["Close"].shift(1)) * 100
+        np.log(
+            df["Close"] / df["Close"].shift(1)
+        )
+        * 100
     )
-    df = df.dropna(subset=["Log_Returns"])
+
+    df = df.dropna(
+        subset=["Log_Returns"]
+    )
 
     return df
 
 
-def generate_image(log_returns):
+def generate_image(
+    log_returns: np.ndarray
+) -> np.ndarray:
     start = log_returns[:-1]
     end = log_returns[1:]
 
     heights = end - start
     bases = start
-    colors = ["green" if height > 0 else "red" for height in heights]
+
+    colors = [
+        "green" if height > 0 else "red"
+        for height in heights
+    ]
 
     fig = plt.figure(
         figsize=(3.8, 3.8),
         dpi=100,
         facecolor="black"
     )
-    ax = fig.add_axes([0, 0, 1, 1])
+
+    ax = fig.add_axes(
+        [0, 0, 1, 1]
+    )
 
     ax.bar(
         range(1, len(log_returns)),
@@ -180,34 +200,53 @@ def generate_image(log_returns):
     canvas.draw()
 
     width, height = canvas.get_width_height()
-    img = np.frombuffer(
+
+    image = np.frombuffer(
         canvas.buffer_rgba(),
         dtype=np.uint8
     )
-    img = img.reshape((height, width, 4))
+
+    image = image.reshape(
+        (height, width, 4)
+    )
 
     plt.close(fig)
 
-    return img[:, :, :3]
+    return image[:, :, :3]
 
 
-def realized_vol(df):
-    return np.sqrt(
-        np.sum(df["Log_Returns"] ** 2)
-    ) * 100
+def realized_vol(
+    df: pd.DataFrame
+) -> float:
+    return float(
+        np.sqrt(
+            np.sum(
+                df["Log_Returns"] ** 2
+            )
+        )
+        * 100
+    )
 
 
-def run_volatility_pipeline(ticker, num_days, model):
-    days = get_recent_full_intraday_days(
-        ticker,
-        num_days
+def run_volatility_pipeline(
+    ticker: str,
+    num_days: int,
+    model
+):
+    ticker = ticker.strip().upper()
+
+    days, data_source = get_recent_full_intraday_days(
+        ticker=ticker,
+        num_days=num_days
     )
 
     results = []
     images_by_date = {}
     processed_by_date = {}
 
-    dates = sorted(days.keys())
+    dates = sorted(
+        days.keys()
+    )
 
     for index, day_date in enumerate(dates):
         processed = preprocess_yahoo_1min_for_cnn(
@@ -218,36 +257,50 @@ def run_volatility_pipeline(ticker, num_days, model):
         if len(processed) != 380:
             continue
 
-        log_returns = processed["Log_Returns"].values
-        img = generate_image(log_returns)
+        log_returns = processed[
+            "Log_Returns"
+        ].values
 
-        x = np.expand_dims(
-            img,
+        image = generate_image(
+            log_returns
+        )
+
+        model_input = np.expand_dims(
+            image,
             axis=0
         ).astype(np.float32)
 
         prediction_raw = model.predict(
-            x,
+            model_input,
             verbose=0
         )
-        pred = float(
-            np.asarray(prediction_raw).reshape(-1)[0]
+
+        prediction = float(
+            np.asarray(
+                prediction_raw
+            ).reshape(-1)[0]
         )
 
-        images_by_date[day_date] = img
+        images_by_date[day_date] = image
         processed_by_date[day_date] = processed
 
         if index + 1 < len(dates):
             next_day = dates[index + 1]
-            next_processed = preprocess_yahoo_1min_for_cnn(
-                days[next_day],
-                ticker
+
+            next_processed = (
+                preprocess_yahoo_1min_for_cnn(
+                    days[next_day],
+                    ticker
+                )
             )
 
             if len(next_processed) == 380:
-                actual = realized_vol(next_processed)
+                actual = realized_vol(
+                    next_processed
+                )
             else:
                 actual = np.nan
+
         else:
             next_day = "NEXT TRADING DAY"
             actual = np.nan
@@ -257,7 +310,7 @@ def run_volatility_pipeline(ticker, num_days, model):
                 "ticker": ticker,
                 "input_day": day_date,
                 "predicts_for": next_day,
-                "prediction": pred,
+                "prediction": prediction,
                 "actual_RV": actual
             }
         )
@@ -267,15 +320,23 @@ def run_volatility_pipeline(ticker, num_days, model):
             f"No valid 380-row trading days found for {ticker}"
         )
 
-    results_df = pd.DataFrame(results)
+    results_df = pd.DataFrame(
+        results
+    )
+
+    # Store whether the pipeline used live or demo data.
+    results_df.attrs["data_source"] = data_source
 
     annualization_factor = np.sqrt(252)
 
     results_df["prediction_daily_pct"] = (
-        results_df["prediction"] / 100
+        results_df["prediction"]
+        / 100
     )
+
     results_df["actual_RV_daily_pct"] = (
-        results_df["actual_RV"] / 100
+        results_df["actual_RV"]
+        / 100
     )
 
     results_df["prediction_annualized"] = (
@@ -310,8 +371,11 @@ def run_volatility_pipeline(ticker, num_days, model):
     )
 
 
-def summarize_forecast(results_df):
+def summarize_forecast(
+    results_df: pd.DataFrame
+) -> dict:
     last_row = results_df.iloc[-1]
+
     previous_actual_rows = results_df.dropna(
         subset=["actual_RV_annualized"]
     )
@@ -320,6 +384,7 @@ def summarize_forecast(results_df):
         previous_day_vol = previous_actual_rows.iloc[-1][
             "actual_RV_annualized"
         ]
+
         diff_to_previous = (
             last_row["prediction_annualized"]
             - previous_day_vol
@@ -331,15 +396,22 @@ def summarize_forecast(results_df):
             direction = "decrease"
         else:
             direction = "unchanged"
+
     else:
         previous_day_vol = np.nan
         diff_to_previous = np.nan
         direction = "unknown"
 
     return {
-        "ticker": str(last_row["ticker"]),
-        "input_day": str(last_row["input_day"]),
-        "forecast_for": str(last_row["predicts_for"]),
+        "ticker": str(
+            last_row["ticker"]
+        ),
+        "input_day": str(
+            last_row["input_day"]
+        ),
+        "forecast_for": str(
+            last_row["predicts_for"]
+        ),
         "next_day_prediction_annualized": float(
             last_row["prediction_annualized"]
         ),
@@ -353,5 +425,9 @@ def summarize_forecast(results_df):
             if pd.isna(diff_to_previous)
             else float(diff_to_previous)
         ),
-        "direction": direction
+        "direction": direction,
+        "data_source": results_df.attrs.get(
+            "data_source",
+            "unknown"
+        )
     }
