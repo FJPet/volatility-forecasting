@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import time
+from cachetools import TTLCache, cached
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -10,28 +11,43 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 MARKET_TZ = "America/New_York"
 
+market_data_cache = TTLCache(
+    maxsize=32,
+    ttl=1800
+)
 
-def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
+
+@cached(market_data_cache)
+def download_intraday_data(ticker: str, num_days: int) -> pd.DataFrame:
+    ticker = ticker.strip().upper()
+
     df = yf.download(
         ticker,
         interval="1m",
         period=f"{num_days}d",
         progress=False,
         auto_adjust=False,
-        threads=False
+        threads=False,
+        timeout=30
     )
 
-    if df.empty:
+    if df is None or df.empty:
         raise ValueError(
-            f"No data returned for {ticker}. Yahoo Finance may be rate-limiting requests."
+            f"No data returned for {ticker}. "
+            "Yahoo Finance may be temporarily rate-limiting requests."
         )
+
+    return df
+def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
+    ticker = ticker.strip().upper()
+
+    df = download_intraday_data(ticker, num_days).copy()
 
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
     df.index = pd.to_datetime(df.index)
 
-    # Robust timezone handling for Streamlit Cloud
     if df.index.tz is not None:
         df = df.tz_convert(MARKET_TZ)
     else:
@@ -47,7 +63,9 @@ def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
             full_days[d] = day
 
     if not full_days:
-        raise ValueError(f"No complete intraday trading days found for {ticker}")
+        raise ValueError(
+            f"No complete intraday trading days found for {ticker}"
+        )
 
     return full_days
 
