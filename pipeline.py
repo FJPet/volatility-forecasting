@@ -38,10 +38,22 @@ def download_intraday_data(ticker: str, num_days: int) -> pd.DataFrame:
         )
 
     return df
-def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
-    ticker = ticker.strip().upper()
+ddef get_recent_full_intraday_days(ticker="AAPL", num_days=7):
+    df = yf.download(
+        ticker,
+        interval="1m",
+        period="1mo",
+        progress=False,
+        auto_adjust=False,
+        threads=False,
+        timeout=30
+    )
 
-    df = download_intraday_data(ticker, num_days).copy()
+    if df.empty:
+        raise ValueError(
+            f"No data returned for {ticker}. "
+            "Yahoo Finance may be rate-limiting requests."
+        )
 
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
@@ -65,6 +77,16 @@ def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
     if not full_days:
         raise ValueError(
             f"No complete intraday trading days found for {ticker}"
+        )
+
+    full_days = dict(
+        list(sorted(full_days.items()))[-num_days:]
+    )
+
+    if len(full_days) < num_days:
+        raise ValueError(
+            f"Only {len(full_days)} complete trading days were returned for {ticker}; "
+            f"{num_days} were requested."
         )
 
     return full_days
