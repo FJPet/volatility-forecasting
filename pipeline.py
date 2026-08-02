@@ -38,7 +38,7 @@ def download_intraday_data(ticker: str, num_days: int) -> pd.DataFrame:
         )
 
     return df
-ddef get_recent_full_intraday_days(ticker="AAPL", num_days=7):
+def get_recent_full_intraday_days(ticker="AAPL", num_days=7):
     df = yf.download(
         ticker,
         interval="1m",
